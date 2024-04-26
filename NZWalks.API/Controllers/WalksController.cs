@@ -1,248 +1,113 @@
 ﻿using AutoMapper;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using NZWalks.API.CustomActionFilters;
+using NZWalks.API.Models.Domain;
+using NZWalks.API.Models.DTO;
 using NZWalks.API.Repositories;
+using System.Net;
 
 namespace NZWalks.API.Controllers
 {
+    // /api/walks
+    [Route("api/[controller]")]
     [ApiController]
-    [Route("[controller]")]
-    public class WalksController : Controller
+    public class WalksController : ControllerBase
     {
-        private readonly IWalkRepository walkRepository;
         private readonly IMapper mapper;
-        private readonly IRegionRepository regionRepository;
-        private readonly IWalkDifficultyRepository walkDifficultyRepository;
+        private readonly IWalkRepository walkRepository;
 
-        public WalksController(IWalkRepository walkRepository, IMapper mapper,
-            IRegionRepository regionRepository, IWalkDifficultyRepository walkDifficultyRepository )
+        public WalksController(IMapper mapper, IWalkRepository walkRepository)
         {
-            this.walkRepository = walkRepository;
             this.mapper = mapper;
-            this.regionRepository = regionRepository;
-            this.walkDifficultyRepository = walkDifficultyRepository;
+            this.walkRepository = walkRepository;
         }
 
-        [HttpGet]
-        [Authorize(Roles = "reader")]
-        public async Task<IActionResult> GetAllWalksAsync()
-        {
-            // Fetch data from database - domain walks
-            var walksDomain = await walkRepository.GetAllAsync();
 
-            // Convert domain walks to DTO Walks
-            var walksDTO = mapper.Map<List<Models.DTO.Walk>>(walksDomain);
-
-            // Return response
-            return Ok(walksDTO);
-        }
-
-        [HttpGet]
-        [Route("{id:guid}")]
-        [ActionName("GetWalkAsync")]
-        [Authorize(Roles = "reader")]
-        public async Task<IActionResult> GetWalkAsync(Guid id)
-        {
-            // Get Walk Domain object from database
-            var walkDomin = await walkRepository.GetAsync(id);
-
-            // Convert Domain object to DTO
-            var walkDTO = mapper.Map<Models.DTO.Walk>(walkDomin);
-
-            // Return response
-            return Ok(walkDTO);
-        }
-
+        // CREATE Walk
+        // POST: /api/walks
         [HttpPost]
-        [Authorize(Roles = "writer")]
-        public async Task<IActionResult> AddWalkAsync([FromBody] Models.DTO.AddWalkRequest addWalkRequest)
+        [ValidateModel]
+        public async Task<IActionResult> Create([FromBody] AddWalkRequestDto addWalkRequestDto)
         {
-            // Validate the incoming request
-            if (!(await ValidateAddWalkAsync(addWalkRequest)))
-            {
-                return BadRequest(ModelState);
-            }
+            // Map DTO to Domain Model
+            var walkDomainModel = mapper.Map<Walk>(addWalkRequestDto);
 
-            // Convert DTO to Domain Object
-            var walkDomain = new Models.Domain.Walk
-            {
-                Length = addWalkRequest.Length,
-                Name = addWalkRequest.Name,
-                RegionId = addWalkRequest.RegionId,
-                WalkDifficultyId = addWalkRequest.WalkDifficultyId
-            };
+            await walkRepository.CreateAsync(walkDomainModel);
 
-            // Pass domain object to Repository to persist this
-            walkDomain = await walkRepository.AddAsync(walkDomain);
-
-            // Convert the Domain object back to DTO
-            var walkDTO = new Models.DTO.Walk
-            {
-                Id = walkDomain.Id,
-                Length = walkDomain.Length,
-                Name = walkDomain.Name,
-                RegionId = walkDomain.RegionId,
-                WalkDifficultyId = walkDomain.WalkDifficultyId
-            };
-
-            // Send DTO response back to Client
-            return CreatedAtAction(nameof(GetWalkAsync), new { id = walkDTO.Id }, walkDTO);
+            // Map Domain model to DTO
+            return Ok(mapper.Map<WalkDto>(walkDomainModel));
         }
 
 
+        // GET Walks
+        // GET: /api/walks?filterOn=Name&filterQuery=Track&sortBy=Name&isAscending=true&pageNumber=1&pageSize=10
+        [HttpGet]
+        public async Task<IActionResult> GetAll([FromQuery] string? filterOn, [FromQuery] string? filterQuery,
+            [FromQuery] string? sortBy, [FromQuery] bool? isAscending,
+            [FromQuery] int pageNumber = 1, [FromQuery] int pageSize = 1000)
+        {
+            var walksDomainModel = await walkRepository.GetAllAsync(filterOn, filterQuery, sortBy,
+                    isAscending ?? true, pageNumber, pageSize);
+
+            // Map Domain Model to DTO
+            return Ok(mapper.Map<List<WalkDto>>(walksDomainModel));
+        }
+
+        // Get Walk By Id
+        // GET: /api/Walks/{id}
+        [HttpGet]
+        [Route("{id:Guid}")]
+        public async Task<IActionResult> GetById([FromRoute] Guid id)
+        {
+            var walkDomainModel = await walkRepository.GetByIdAsync(id);
+
+            if (walkDomainModel == null)
+            {
+                return NotFound();
+            }
+
+            // Map Domain Model to DTO
+            return Ok(mapper.Map<WalkDto>(walkDomainModel));
+        }
+
+        // Update Walk By Id
+        // PUT: /api/Walks/{id}
         [HttpPut]
-        [Route("{id:guid}")]
-        [Authorize(Roles = "writer")]
-        public async Task<IActionResult> UpdateWalkAsync([FromRoute] Guid id,
-            [FromBody] Models.DTO.UpdateWalkRequest updateWalkRequest)
+        [Route("{id:Guid}")]
+        [ValidateModel]
+        public async Task<IActionResult> Update([FromRoute] Guid id, UpdateWalkRequestDto updateWalkRequestDto)
         {
-            // Validate the incoming request
-            if (!(await ValidateUpdateWalkAsync(updateWalkRequest)))
-            {
-                return BadRequest(ModelState);
-            }
 
-            // Convert DTO to Domain object
-            var walkDomain = new Models.Domain.Walk
-            {
-                Length = updateWalkRequest.Length,
-                Name = updateWalkRequest.Name,
-                RegionId = updateWalkRequest.RegionId,
-                WalkDifficultyId = updateWalkRequest.WalkDifficultyId
-            };
+            // Map DTO to Domain Model
+            var walkDomainModel = mapper.Map<Walk>(updateWalkRequestDto);
 
-            // Pass details to Repository - Get Domain object in response (or null)
-            walkDomain = await walkRepository.UpdateAsync(id, walkDomain);
+            walkDomainModel = await walkRepository.UpdateAsync(id, walkDomainModel);
 
-            // Handle Null (not found)
-            if (walkDomain == null)
+            if (walkDomainModel == null)
             {
                 return NotFound();
             }
 
-            // Convert back Domain to DTO
-            var walkDTO = new Models.DTO.Walk
-            {
-                Id = walkDomain.Id,
-                Length = walkDomain.Length,
-                Name = walkDomain.Name,
-                RegionId = walkDomain.RegionId,
-                WalkDifficultyId = walkDomain.WalkDifficultyId
-            };
-
-            // Return Response
-            return Ok(walkDTO);
+            // Map Domain Model to DTO
+            return Ok(mapper.Map<WalkDto>(walkDomainModel));
         }
 
+
+        // Delete a Walk By Id
+        // DELETE: /api/Walks/{id}
         [HttpDelete]
-        [Route("{id:guid}")]
-        [Authorize(Roles = "writer")]
-        public async Task<IActionResult> DeleteWalkAsync(Guid id)
+        [Route("{id:Guid}")]
+        public async Task<IActionResult> Delete([FromRoute] Guid id)
         {
-            // call Repository to delete walk
-            var walkDomain = await walkRepository.DeleteAsync(id);
+            var deletedWalkDomainModel = await walkRepository.DeleteAsync(id);
 
-            if (walkDomain == null)
+            if (deletedWalkDomainModel == null)
             {
                 return NotFound();
             }
 
-            var walkDTO = mapper.Map<Models.DTO.Walk>(walkDomain);
-
-            return Ok(walkDTO);
+            // Map Domain Model to DTO
+            return Ok(mapper.Map<WalkDto>(deletedWalkDomainModel));
         }
-
-
-        #region Private methods
-
-        private async Task<bool> ValidateAddWalkAsync(Models.DTO.AddWalkRequest addWalkRequest)
-        {
-            //if (addWalkRequest == null)
-            //{
-            //    ModelState.AddModelError(nameof(addWalkRequest),
-            //        $"{nameof(addWalkRequest)} cannot be empty.");
-            //    return false;
-            //}
-
-            //if (string.IsNullOrWhiteSpace(addWalkRequest.Name))
-            //{
-            //    ModelState.AddModelError(nameof(addWalkRequest.Name),
-            //        $"{nameof(addWalkRequest.Name)} is required.");
-            //}
-
-            //if (addWalkRequest.Length <= 0)
-            //{
-            //    ModelState.AddModelError(nameof(addWalkRequest.Length),
-            //        $"{nameof(addWalkRequest.Length)} should be greater than zero.");
-            //}
-
-            var region = await regionRepository.GetAsync(addWalkRequest.RegionId);
-            if (region == null)
-            {
-                ModelState.AddModelError(nameof(addWalkRequest.RegionId),
-                    $"{nameof(addWalkRequest.RegionId)} is invalid.");
-            }
-
-            var walkDifficulty = await walkDifficultyRepository.GetAsync(addWalkRequest.WalkDifficultyId);
-            if (walkDifficulty == null)
-            {
-                ModelState.AddModelError(nameof(addWalkRequest.WalkDifficultyId),
-                       $"{nameof(addWalkRequest.WalkDifficultyId)} is invalid.");
-
-            }
-
-            if (ModelState.ErrorCount > 0)
-            {
-                return false;
-            }
-
-            return true;
-        }
-
-        private async Task<bool> ValidateUpdateWalkAsync(Models.DTO.UpdateWalkRequest updateWalkRequest)
-        {
-            //if (updateWalkRequest == null)
-            //{
-            //    ModelState.AddModelError(nameof(updateWalkRequest),
-            //        $"{nameof(updateWalkRequest)} cannot be empty.");
-            //    return false;
-            //}
-
-            //if (string.IsNullOrWhiteSpace(updateWalkRequest.Name))
-            //{
-            //    ModelState.AddModelError(nameof(updateWalkRequest.Name),
-            //        $"{nameof(updateWalkRequest.Name)} is required.");
-            //}
-
-            //if (updateWalkRequest.Length <= 0)
-            //{
-            //    ModelState.AddModelError(nameof(updateWalkRequest.Length),
-            //        $"{nameof(updateWalkRequest.Length)} should be greater than zero.");
-            //}
-
-            var region = await regionRepository.GetAsync(updateWalkRequest.RegionId);
-            if (region == null)
-            {
-                ModelState.AddModelError(nameof(updateWalkRequest.RegionId),
-                    $"{nameof(updateWalkRequest.RegionId)} is invalid.");
-            }
-
-            var walkDifficulty = await walkDifficultyRepository.GetAsync(updateWalkRequest.WalkDifficultyId);
-            if (walkDifficulty == null)
-            {
-                ModelState.AddModelError(nameof(updateWalkRequest.WalkDifficultyId),
-                       $"{nameof(updateWalkRequest.WalkDifficultyId)} is invalid.");
-
-            }
-
-            if (ModelState.ErrorCount > 0)
-            {
-                return false;
-            }
-
-            return true;
-        }
-
-        #endregion
     }
 }

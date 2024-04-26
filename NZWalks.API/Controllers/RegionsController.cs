@@ -1,277 +1,129 @@
 ﻿using AutoMapper;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using NZWalks.API.CustomActionFilters;
+using NZWalks.API.Data;
 using NZWalks.API.Models.Domain;
+using NZWalks.API.Models.DTO;
 using NZWalks.API.Repositories;
 
 namespace NZWalks.API.Controllers
 {
+    // https://localhost:1234/api/regions
+    [Route("api/[controller]")]
     [ApiController]
-    [Route("[controller]")]
-    public class RegionsController : Controller
+    public class RegionsController : ControllerBase
     {
+        private readonly WalksDbContext dbContext;
         private readonly IRegionRepository regionRepository;
         private readonly IMapper mapper;
+        private readonly ILogger<RegionsController> logger;
 
-        public RegionsController(IRegionRepository regionRepository, IMapper mapper)
+        public RegionsController(WalksDbContext dbContext,
+            IRegionRepository regionRepository,
+            IMapper mapper,
+            ILogger<RegionsController> logger)
         {
+            this.dbContext = dbContext;
             this.regionRepository = regionRepository;
             this.mapper = mapper;
+            this.logger = logger;
         }
 
+        // GET ALL REGIONS
+        // GET: https://localhost:portnumber/api/regions
         [HttpGet]
-        [Authorize(Roles = "reader")]
-        public async Task<IActionResult> GetAllRegionsAsync()
+        // [Authorize(Roles = "Writer, Reader")]
+        public async Task<IActionResult> GetAll()
         {
-            var regions = await regionRepository.GetAllAsync();
+            // Get Data From Database - Domain models
+            var regionsDomain = await regionRepository.GetAllAsync();
 
-            // return DTO regions
-            //var regionsDTO = new List<Models.DTO.Region>();
-            //regions.ToList().ForEach(region =>
-            //{
-            //    var regionDTO = new Models.DTO.Region()
-            //    {
-            //        Id = region.Id,
-            //        Code = region.Code,
-            //        Name = region.Name,
-            //        Area = region.Area,
-            //        Lat = region.Lat,
-            //        Long = region.Long,
-            //        Population = region.Population,
-            //    };
-
-            //    regionsDTO.Add(regionDTO);
-            //});
-
-            var regionsDTO = mapper.Map<List<Models.DTO.Region>>(regions);
-
-            return Ok(regionsDTO);
+            // Return DTOs
+            return Ok(mapper.Map<List<RegionDto>>(regionsDomain));
         }
 
-        [HttpGet]
-        [Route("{id:guid}")]
-        [ActionName("GetRegionAsync")]
-        [Authorize(Roles = "reader")]
-        public async Task<IActionResult> GetRegionAsync(Guid id)
-        {
-            var region = await regionRepository.GetAsync(id);
 
-            if (region == null)
+        // GET SINGLE REGION (Get Region By ID)
+        // GET: https://localhost:portnumber/api/regions/{id}
+        [HttpGet]
+        [Route("{id:Guid}")]
+        // [Authorize(Roles = "Writer, Reader")]
+        public async Task<IActionResult> GetById([FromRoute] Guid id)
+        {
+            // var region = dbContext.Regions.Find(id);
+            // Get Region Domain Model From Database
+            var regionDomain = await regionRepository.GetByIdAsync(id);
+
+            if (regionDomain == null)
             {
                 return NotFound();
             }
 
-            var regionDTO = mapper.Map<Models.DTO.Region>(region);
-            return Ok(regionDTO);
+            // Return DTO back to client
+            return Ok(mapper.Map<RegionDto>(regionDomain));
         }
 
+
+        // POST To Create New Region
+        // POST: https://localhost:portnumber/api/regions
         [HttpPost]
-        [Authorize(Roles = "writer")]
-        public async Task<IActionResult> AddRegionAsync(Models.DTO.AddRegionRequest addRegionRequest)
+        [ValidateModel]
+        // [Authorize(Roles = "Writer")]
+        public async Task<IActionResult> Create([FromBody] AddRegionRequestDto addRegionRequestDto)
         {
-            // Validate The Request
-            //if (!ValidateAddRegionAsync(addRegionRequest))
-            //{
-            //    return BadRequest(ModelState);
-            //}
+            // Map or Convert DTO to Domain Model
+            var regionDomainModel = mapper.Map<Region>(addRegionRequestDto);
 
-            // Request(DTO) to Domain model
-            var region = new Models.Domain.Region()
-            {
-                Code = addRegionRequest.Code,
-                Area = addRegionRequest.Area,
-                Lat = addRegionRequest.Lat,
-                Long = addRegionRequest.Long,
-                Name = addRegionRequest.Name,
-                Population = addRegionRequest.Population
-            };
+            // Use Domain Model to create Region
+            regionDomainModel = await regionRepository.CreateAsync(regionDomainModel);
 
-            // Pass details to Repository
-            region = await regionRepository.AddAsync(region);
+            // Map Domain model back to DTO
+            var regionDto = mapper.Map<RegionDto>(regionDomainModel);
 
-            // Convert back to DTO
-
-            var regionDTO = new Models.DTO.Region
-            {
-                Id = region.Id,
-                Code = region.Code,
-                Area = region.Area,
-                Lat = region.Lat,
-                Long = region.Long,
-                Name = region.Name,
-                Population = region.Population
-            };
-
-            return CreatedAtAction(nameof(GetRegionAsync), new { id = regionDTO.Id }, regionDTO);
+            return CreatedAtAction(nameof(GetById), new { id = regionDto.Id }, regionDto);
         }
 
-        [HttpDelete]
-        [Route("{id:guid}")]
-        [Authorize(Roles = "writer")]
-        public async Task<IActionResult> DeleteRegionAsync(Guid id)
-        {
-            // Get region from database
-            var region = await regionRepository.DeleteAsync(id);
 
-            // If null NotFound
-            if (region == null)
-            {
-                return NotFound();
-            }
-
-            // Convert response back to DTO
-            var regionDTO = new Models.DTO.Region
-            {
-                Id = region.Id,
-                Code = region.Code,
-                Area = region.Area,
-                Lat = region.Lat,
-                Long = region.Long,
-                Name = region.Name,
-                Population = region.Population
-            };
-
-
-            // return Ok response
-            return Ok(regionDTO);
-        }
-
+        // Update region
+        // PUT: https://localhost:portnumber/api/regions/{id}
         [HttpPut]
-        [Route("{id:guid}")]
-        [Authorize(Roles = "writer")]
-        public async Task<IActionResult> UpdateRegionAsync([FromRoute] Guid id, 
-            [FromBody] Models.DTO.UpdateRegionRequest updateRegionRequest)
+        [Route("{id:Guid}")]
+        [ValidateModel]
+        // [Authorize(Roles = "Writer")]
+        public async Task<IActionResult> Update([FromRoute] Guid id, [FromBody] UpdateRegionRequestDto updateRegionRequestDto)
         {
-            // Validate the incoming request
-            //if (!ValidateUpdateRegionAsync(updateRegionRequest))
-            //{
-            //    return BadRequest(ModelState);
-            //}
 
-            // Convert DTO to Domain model
-            var region = new Models.Domain.Region()
-            {
-                Code = updateRegionRequest.Code,
-                Area = updateRegionRequest.Area,
-                Lat = updateRegionRequest.Lat,
-                Long = updateRegionRequest.Long,
-                Name = updateRegionRequest.Name,
-                Population = updateRegionRequest.Population
-            };
+            // Map DTO to Domain Model
+            var regionDomainModel = mapper.Map<Region>(updateRegionRequestDto);
 
+            // Check if region exists
+            regionDomainModel = await regionRepository.UpdateAsync(id, regionDomainModel);
 
-            // Update Region using repository
-            region = await regionRepository.UpdateAsync(id, region);
-
-
-            // If Null then NotFound
-            if (region == null)
+            if (regionDomainModel == null)
             {
                 return NotFound();
             }
 
-            // Convert Domain back to DTO
-            var regionDTO = new Models.DTO.Region
-            {
-                Id = region.Id,
-                Code = region.Code,
-                Area = region.Area,
-                Lat = region.Lat,
-                Long = region.Long,
-                Name = region.Name,
-                Population = region.Population
-            };
-
-
-            // Return Ok response
-            return Ok(regionDTO);
+            return Ok(mapper.Map<RegionDto>(regionDomainModel));
         }
 
 
-        #region Private methods
-
-        private bool ValidateAddRegionAsync(Models.DTO.AddRegionRequest addRegionRequest)
+        // Delete Region
+        // DELETE: https://localhost:portnumber/api/regions/{id}
+        [HttpDelete]
+        [Route("{id:Guid}")]
+        // [Authorize(Roles = "Writer")]
+        public async Task<IActionResult> Delete([FromRoute] Guid id)
         {
-            if (addRegionRequest == null)
+            var regionDomainModel = await regionRepository.DeleteAsync(id);
+
+            if (regionDomainModel == null)
             {
-                ModelState.AddModelError(nameof(addRegionRequest),
-                    $"Add Region Data is required.");
-                return false;
+                return NotFound();
             }
 
-            if (string.IsNullOrWhiteSpace(addRegionRequest.Code))
-            {
-                ModelState.AddModelError(nameof(addRegionRequest.Code), 
-                    $"{nameof(addRegionRequest.Code)} cannot be null or empty or white space.");
-            }
-
-            if (string.IsNullOrWhiteSpace(addRegionRequest.Name))
-            {
-                ModelState.AddModelError(nameof(addRegionRequest.Name),
-                    $"{nameof(addRegionRequest.Name)} cannot be null or empty or white space.");
-            }
-
-            if (addRegionRequest.Area <= 0)
-            {
-                ModelState.AddModelError(nameof(addRegionRequest.Area),
-                    $"{nameof(addRegionRequest.Area)} cannot be less than or equal to zero.");
-            }
-
-            if (addRegionRequest.Population < 0)
-            {
-                ModelState.AddModelError(nameof(addRegionRequest.Population),
-                    $"{nameof(addRegionRequest.Population)} cannot be less than zero.");
-            }
-
-            if (ModelState.ErrorCount > 0)
-            {
-                return false;
-            }
-
-            return true;
+            return Ok(mapper.Map<RegionDto>(regionDomainModel));
         }
-
-        private bool ValidateUpdateRegionAsync(Models.DTO.UpdateRegionRequest updateRegionRequest)
-        {
-            if (updateRegionRequest == null)
-            {
-                ModelState.AddModelError(nameof(updateRegionRequest),
-                    $"Add Region Data is required.");
-                return false;
-            }
-
-            if (string.IsNullOrWhiteSpace(updateRegionRequest.Code))
-            {
-                ModelState.AddModelError(nameof(updateRegionRequest.Code),
-                    $"{nameof(updateRegionRequest.Code)} cannot be null or empty or white space.");
-            }
-
-            if (string.IsNullOrWhiteSpace(updateRegionRequest.Name))
-            {
-                ModelState.AddModelError(nameof(updateRegionRequest.Name),
-                    $"{nameof(updateRegionRequest.Name)} cannot be null or empty or white space.");
-            }
-
-            if (updateRegionRequest.Area <= 0)
-            {
-                ModelState.AddModelError(nameof(updateRegionRequest.Area),
-                    $"{nameof(updateRegionRequest.Area)} cannot be less than or equal to zero.");
-            }
-
-            if (updateRegionRequest.Population < 0)
-            {
-                ModelState.AddModelError(nameof(updateRegionRequest.Population),
-                    $"{nameof(updateRegionRequest.Population)} cannot be less than zero.");
-            }
-
-            if (ModelState.ErrorCount > 0)
-            {
-                return false;
-            }
-
-            return true;
-        }
-
-        #endregion
     }
 }
