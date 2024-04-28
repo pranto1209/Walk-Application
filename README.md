@@ -1,7 +1,8 @@
 # Walk-Application
 
 
-# Update Database
+Update Database
+
 Add-Migration -Context "WalksDbContext"
 
 Add-Migration -Context "WalksAuthDbContext"
